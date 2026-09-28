@@ -118,6 +118,15 @@ LEGAL_MAP = {
 # DATA LOADING
 # ============================================================
 
+# User profile fields carried from CSV into post records.
+# Older CSVs without these columns are still accepted gracefully.
+USER_PROFILE_FIELDS = [
+    "username", "display_name", "email", "phone",
+    "location", "ip_address", "join_date",
+    "follower_count", "following_count", "bio",
+]
+
+
 def load_posts(filename):
     posts = []
 
@@ -567,6 +576,28 @@ def generate_brief(posts):
         coordination_score
     )
 
+    # Build flagged-actors map: only extract user profile data for
+    # accounts whose posts were classified as a threat.
+    flagged_account_ids = {
+        c["account"]
+        for c in classifications
+        if c["category"] != "unclassified"
+    }
+
+    flagged_actors = {}
+    for post in posts:
+        aid = post["account_id"]
+        if aid not in flagged_account_ids:
+            continue
+        if aid in flagged_actors:
+            continue  # already recorded from a previous post
+        profile = {
+            field: post.get(field, "N/A")
+            for field in USER_PROFILE_FIELDS
+        }
+        profile["account_id"] = aid
+        flagged_actors[aid] = profile
+
     brief = {
         "brief_timestamp_utc": generated_at,
 
@@ -594,6 +625,8 @@ def generate_brief(posts):
         "legal_review": legal,
 
         "recommended_escalation": escalation,
+
+        "flagged_actors": list(flagged_actors.values()),
 
         "analyst_warning": (
             "This is an analytical triage output, not a finding "
@@ -671,6 +704,26 @@ def format_brief(brief):
     lines.append(thin)
     for step in brief["recommended_escalation"]:
         lines.append(f"  • {step}")
+
+    lines.append("")
+    lines.append("FLAGGED ACTORS  (user data extracted only for flagged posts)")
+    lines.append(thin)
+    actors = brief.get("flagged_actors", [])
+    if actors:
+        for actor in actors:
+            lines.append(f"\n  Account ID    : {actor['account_id']}")
+            lines.append(f"  Username      : {actor.get('username', 'N/A')}")
+            lines.append(f"  Display Name  : {actor.get('display_name', 'N/A')}")
+            lines.append(f"  Email         : {actor.get('email', 'N/A')}")
+            lines.append(f"  Phone         : {actor.get('phone', 'N/A')}")
+            lines.append(f"  Location      : {actor.get('location', 'N/A')}")
+            lines.append(f"  IP Address    : {actor.get('ip_address', 'N/A')}")
+            lines.append(f"  Joined        : {actor.get('join_date', 'N/A')}")
+            lines.append(f"  Followers     : {actor.get('follower_count', 'N/A')}")
+            lines.append(f"  Following     : {actor.get('following_count', 'N/A')}")
+            lines.append(f"  Bio           : {actor.get('bio', 'N/A')}")
+    else:
+        lines.append("  (no profile data available — CSV may not include user columns)")
 
     lines.append("")
     lines.append("ANALYST WARNING")
